@@ -78,15 +78,15 @@ func generateCode(length int) string {
 	return string(b)
 }
 
-// SaveCode guarda un código para un correo con opciones personalizables
 func (s *Store) SaveCode(email string, codeLength int, expireMinutes int, maxAttempts int) (string, error) {
+	// Valores por defecto
 	if codeLength <= 0 {
 		codeLength = 4
 	}
 	if expireMinutes <= 0 {
 		expireMinutes = 2
 	}
-	if maxAttempts < 1 {
+	if maxAttempts <= 0 {
 		maxAttempts = 3
 	}
 
@@ -101,10 +101,14 @@ func (s *Store) SaveCode(email string, codeLength int, expireMinutes int, maxAtt
 			if err := json.Unmarshal(data, &entry); err != nil {
 				return err
 			}
-			// Mantener intentos previos hasta MaxAttempts
+			// Sumar un intento por generar nuevo código, hasta MaxAttempts
+			entry.Attempts++
 			if entry.Attempts > maxAttempts {
 				entry.Attempts = maxAttempts
 			}
+		} else {
+			// Si no existía, inicializar Attempts en 1
+			entry.Attempts = 1
 		}
 
 		// Actualizar registro con nuevo código y expiración
@@ -187,4 +191,28 @@ func (s *Store) GetCodeEntry(email string) (*CodeEntry, error) {
 		return nil, err
 	}
 	return &entry, nil
+}
+
+// DumpDB devuelve todos los registros del bucket tal como están guardados en la base de datos
+func (s *Store) DumpDB() (map[string][]byte, error) {
+	records := make(map[string][]byte)
+
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketName)
+		if b == nil {
+			return errors.New("bucket no encontrado")
+		}
+
+		return b.ForEach(func(k, v []byte) error {
+			// Guardamos cada registro tal como está
+			records[string(k)] = append([]byte(nil), v...)
+			return nil
+		})
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return records, nil
 }
