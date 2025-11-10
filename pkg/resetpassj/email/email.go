@@ -1,4 +1,3 @@
-// Package email
 package email
 
 import (
@@ -17,7 +16,6 @@ type SMTPConfig struct {
 	Password string
 }
 
-// NewEmailService permite configurar cualquier proveedor SMTP (Gmail, Outlook, Mailgun, etc.)
 func NewEmailService(cfg SMTPConfig) *EmailService {
 	dialer := gomail.NewDialer(cfg.Host, cfg.Port, cfg.Username, cfg.Password)
 
