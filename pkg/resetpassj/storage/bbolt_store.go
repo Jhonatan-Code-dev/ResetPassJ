@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"errors"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,13 +13,17 @@ import (
 
 var (
 	bucketName = []byte("reset_codes")
-	dbFileName = "resetpassj.db" // Nombre fijo de la base de datos dentro del módulo
+	dbFileName = "resetpassj.db"
 )
 
-// CodeEntry representa un código de restablecimiento con fecha de expiración
+// CodeEntry representa un código de restablecimiento por correo
 type CodeEntry struct {
-	Code     string
-	ExpireAt time.Time
+	Email       string
+	Code        string
+	ExpireAt    time.Time
+	Attempts    int
+	MaxAttempts int
+	Used        bool
 }
 
 // Store encapsula la base de datos bbolt
@@ -28,19 +33,16 @@ type Store struct {
 
 // NewStore crea o abre la base de datos dentro de pkg/resetpassj/storage
 func NewStore() (*Store, error) {
-	// Obtener ruta absoluta del proyecto
 	basePath, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 
-	// Crear carpeta storage si no existe
 	storagePath := filepath.Join(basePath, "pkg", "resetpassj", "storage")
 	if err := os.MkdirAll(storagePath, os.ModePerm); err != nil {
 		return nil, err
 	}
 
-	// Ruta completa de la base de datos
 	dbPath := filepath.Join(storagePath, dbFileName)
 
 	db, err := bbolt.Open(dbPath, 0666, nil)
@@ -48,7 +50,6 @@ func NewStore() (*Store, error) {
 		return nil, err
 	}
 
-	// Crear bucket si no existe
 	err = db.Update(func(tx *bbolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists(bucketName)
 		return err
@@ -66,30 +67,99 @@ func (s *Store) Close() {
 	s.db.Close()
 }
 
-// SaveCode guarda un código para un correo con expiración
-func (s *Store) SaveCode(email, code string, expireAt time.Time) error {
-	entry := CodeEntry{Code: code, ExpireAt: expireAt}
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return err
+// generateCode genera un código aleatorio de longitud n
+func generateCode(length int) string {
+	const charset = "0123456789"
+	rand.Seed(time.Now().UnixNano())
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[rand.Intn(len(charset))]
 	}
-
-	return s.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(bucketName)
-		return b.Put([]byte(email), data)
-	})
+	return string(b)
 }
 
-// VerifyCode verifica un código de restablecimiento
+// SaveCode guarda un código para un correo con opciones personalizables
+func (s *Store) SaveCode(email string, codeLength int, expireMinutes int, maxAttempts int) (string, error) {
+	if codeLength <= 0 {
+		codeLength = 4
+	}
+	if expireMinutes <= 0 {
+		expireMinutes = 2
+	}
+	if maxAttempts < 1 {
+		maxAttempts = 3
+	}
+
+	code := generateCode(codeLength)
+
+	err := s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketName)
+
+		var entry CodeEntry
+		data := b.Get([]byte(email))
+		if data != nil {
+			if err := json.Unmarshal(data, &entry); err != nil {
+				return err
+			}
+			// Mantener intentos previos hasta MaxAttempts
+			if entry.Attempts > maxAttempts {
+				entry.Attempts = maxAttempts
+			}
+		}
+
+		// Actualizar registro con nuevo código y expiración
+		entry.Email = email
+		entry.Code = code
+		entry.ExpireAt = time.Now().Add(time.Duration(expireMinutes) * time.Minute)
+		entry.Used = false
+		entry.MaxAttempts = maxAttempts
+
+		newData, err := json.Marshal(entry)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(email), newData)
+	})
+
+	if err != nil {
+		return "", err
+	}
+	return code, nil
+}
+
+// VerifyCode verifica un código y aumenta intentos, marca como usado si es correcto
 func (s *Store) VerifyCode(email, code string) (bool, error) {
 	var entry CodeEntry
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketName)
 		data := b.Get([]byte(email))
 		if data == nil {
 			return errors.New("correo no encontrado")
 		}
-		return json.Unmarshal(data, &entry)
+
+		if err := json.Unmarshal(data, &entry); err != nil {
+			return err
+		}
+
+		if entry.Used {
+			return errors.New("código ya usado")
+		}
+
+		// Incrementar intentos hasta MaxAttempts
+		if entry.Attempts < entry.MaxAttempts {
+			entry.Attempts++
+		}
+
+		// Validar código
+		if entry.Code == code {
+			entry.Used = true
+		}
+
+		updatedData, err := json.Marshal(entry)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(email), updatedData)
 	})
 	if err != nil {
 		return false, err
@@ -100,4 +170,21 @@ func (s *Store) VerifyCode(email, code string) (bool, error) {
 	}
 
 	return entry.Code == code, nil
+}
+
+// GetCodeEntry devuelve el registro completo de un correo
+func (s *Store) GetCodeEntry(email string) (*CodeEntry, error) {
+	var entry CodeEntry
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketName)
+		data := b.Get([]byte(email))
+		if data == nil {
+			return errors.New("correo no encontrado")
+		}
+		return json.Unmarshal(data, &entry)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &entry, nil
 }
