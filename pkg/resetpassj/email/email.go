@@ -136,15 +136,17 @@ func (e *EmailService) send(to, subject, htmlBody string) error {
 }
 
 // =====================================================
-// 🔐 GENERACIÓN DE CÓDIGO DE VERIFICACIÓN
+// 🔐 GENERACIÓN DE CÓDIGO DE VERIFICACIÓN (ACTUALIZADO)
 // =====================================================
 
 func (e *EmailService) GenerateCode() string {
-	rand.Seed(time.Now().UnixNano())
+	src := rand.NewSource(time.Now().UnixNano())
+	r := rand.New(src)
+
 	digits := "0123456789"
 	code := make([]byte, e.conf.CodeLength)
 	for i := range code {
-		code[i] = digits[rand.Intn(len(digits))]
+		code[i] = digits[r.Intn(len(digits))]
 	}
 	return string(code)
 }
@@ -174,21 +176,19 @@ func (e *EmailService) SendResetPassword(to string) error {
 		Restriction: fmt.Sprintf("%.0f horas", e.conf.RestrictionPeriod.Hours()),
 	}
 
-	// ✅ Construcción dinámica de la ruta absoluta del HTML (versión corregida)
+	// ✅ Ruta dinámica basada en ubicación del ejecutable
 	execDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("error obteniendo directorio actual: %w", err)
 	}
 
-	// Ajusta la ruta según tu estructura real:
+	// Ruta correcta sin hardcodear nombres
 	templatePath := filepath.Join(execDir, "pkg", "resetpassj", "email", "templates", "reset_password.html")
 
-	// Verifica existencia antes de abrir
 	if _, err := os.Stat(templatePath); os.IsNotExist(err) {
-		return fmt.Errorf("la plantilla no existe en: %s", templatePath)
+		return fmt.Errorf("❌ plantilla HTML no encontrada en: %s", templatePath)
 	}
 
-	// Cargar la plantilla
 	tmpl, err := template.ParseFiles(templatePath)
 	if err != nil {
 		return fmt.Errorf("error cargando plantilla HTML desde %s: %w", templatePath, err)
