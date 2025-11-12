@@ -1,6 +1,7 @@
 package email
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -19,8 +20,8 @@ type EmailConfig struct {
 	// ---------------- SMTP ----------------
 	Host     string // Servidor SMTP (ej: smtp.gmail.com)
 	Port     int    // Puerto SMTP (ej: 587 o 465)
-	Username string // Correo o usuario autenticado
-	Password string // Contraseña o token de aplicación
+	Username string // Correo o usuario autenticado (OBLIGATORIO)
+	Password string // Contraseña o token de aplicación (OBLIGATORIO)
 
 	// ---------------- DATOS DE APP ----------------
 	AppName string // Nombre de la aplicación (ej: "MiApp Online")
@@ -46,14 +47,70 @@ type EmailService struct {
 // Instancia global (singleton)
 var Service *EmailService
 
-// Init inicializa el servicio global de correo
-func Init(cfg EmailConfig) {
-	Service = NewEmailService(cfg)
-	log.Printf("✅ Servicio de correo '%s' inicializado correctamente. Código de %d dígitos, %d minutos de validez, %d intentos máx.",
-		cfg.AppName, cfg.CodeLength, cfg.CodeValidMinutes, cfg.MaxResetAttempts)
+// =====================================================
+// 🧩 CONFIGURACIÓN POR DEFECTO
+// =====================================================
+
+var defaultEmailConfig = EmailConfig{
+	Host:              "smtp.gmail.com",
+	Port:              587,
+	AppName:           "MiApp",
+	Title:             "Restablecimiento de contraseña",
+	CodeLength:        6,
+	CodeValidMinutes:  15,
+	MaxResetAttempts:  3,
+	RestrictionPeriod: 24 * time.Hour,
 }
 
-// NewEmailService crea una nueva instancia del servicio
+// =====================================================
+// 🚀 INICIALIZACIÓN
+// =====================================================
+
+func Init(cfg EmailConfig) error {
+	// Validar campos obligatorios
+	if cfg.Username == "" || cfg.Password == "" {
+		return errors.New("❌ 'Username' y 'Password' son obligatorios para inicializar el servicio de correo")
+	}
+
+	// Aplicar configuración por defecto si faltan valores
+	if cfg.Host == "" {
+		cfg.Host = defaultEmailConfig.Host
+	}
+	if cfg.Port == 0 {
+		cfg.Port = defaultEmailConfig.Port
+	}
+	if cfg.AppName == "" {
+		cfg.AppName = defaultEmailConfig.AppName
+	}
+	if cfg.Title == "" {
+		cfg.Title = defaultEmailConfig.Title
+	}
+	if cfg.CodeLength == 0 {
+		cfg.CodeLength = defaultEmailConfig.CodeLength
+	}
+	if cfg.CodeValidMinutes == 0 {
+		cfg.CodeValidMinutes = defaultEmailConfig.CodeValidMinutes
+	}
+	if cfg.MaxResetAttempts == 0 {
+		cfg.MaxResetAttempts = defaultEmailConfig.MaxResetAttempts
+	}
+	if cfg.RestrictionPeriod == 0 {
+		cfg.RestrictionPeriod = defaultEmailConfig.RestrictionPeriod
+	}
+
+	Service = NewEmailService(cfg)
+
+	log.Printf("✅ Servicio de correo '%s' inicializado correctamente.\n", cfg.AppName)
+	log.Printf("   ➤ Código: %d dígitos | Validez: %d min | Intentos: %d | Restricción: %.0f horas",
+		cfg.CodeLength, cfg.CodeValidMinutes, cfg.MaxResetAttempts, cfg.RestrictionPeriod.Hours())
+
+	return nil
+}
+
+// =====================================================
+// 🏗️ CONSTRUCTOR
+// =====================================================
+
 func NewEmailService(cfg EmailConfig) *EmailService {
 	dialer := gomail.NewDialer(cfg.Host, cfg.Port, cfg.Username, cfg.Password)
 
@@ -82,8 +139,8 @@ func (e *EmailService) send(to, subject, htmlBody string) error {
 // 🔐 GENERACIÓN DE CÓDIGO DE VERIFICACIÓN
 // =====================================================
 
-// GenerateCode genera un código aleatorio de longitud configurada
 func (e *EmailService) GenerateCode() string {
+	rand.Seed(time.Now().UnixNano())
 	digits := "0123456789"
 	code := make([]byte, e.conf.CodeLength)
 	for i := range code {
@@ -105,7 +162,6 @@ type ResetEmailData struct {
 	Restriction string
 }
 
-// SendResetPassword genera y envía el correo de restablecimiento
 func (e *EmailService) SendResetPassword(to string) error {
 	code := e.GenerateCode()
 
