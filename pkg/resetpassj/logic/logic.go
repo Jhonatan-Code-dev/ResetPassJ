@@ -1,10 +1,11 @@
 package logic
 
 import (
-	"ResetPassJ/pkg/resetpassj/email"
-	"ResetPassJ/pkg/resetpassj/storage"
 	"crypto/rand"
 	"fmt"
+
+	"github.com/Jhonatan-Code-dev/ResetPassJ/pkg/resetpassj/email"
+	"github.com/Jhonatan-Code-dev/ResetPassJ/pkg/resetpassj/storage"
 )
 
 type ResetManager struct {

@@ -1,4 +1,4 @@
-module ResetPassJ
+module github.com/Jhonatan-Code-dev/ResetPassJ
 
 go 1.25.3
 
