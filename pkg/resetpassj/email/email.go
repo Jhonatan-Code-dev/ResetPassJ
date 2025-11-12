@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
@@ -44,7 +46,7 @@ type EmailService struct {
 	conf   EmailConfig
 }
 
-// Instancia global (singleton)
+// Instancia global
 var Service *EmailService
 
 // =====================================================
@@ -67,12 +69,11 @@ var defaultEmailConfig = EmailConfig{
 // =====================================================
 
 func Init(cfg EmailConfig) error {
-	// Validar campos obligatorios
 	if cfg.Username == "" || cfg.Password == "" {
 		return errors.New("❌ 'Username' y 'Password' son obligatorios para inicializar el servicio de correo")
 	}
 
-	// Aplicar configuración por defecto si faltan valores
+	// Aplicar valores por defecto
 	if cfg.Host == "" {
 		cfg.Host = defaultEmailConfig.Host
 	}
@@ -131,7 +132,6 @@ func (e *EmailService) send(to, subject, htmlBody string) error {
 	msg.SetHeader("To", to)
 	msg.SetHeader("Subject", subject)
 	msg.SetBody("text/html", htmlBody)
-
 	return e.dialer.DialAndSend(msg)
 }
 
@@ -174,9 +174,24 @@ func (e *EmailService) SendResetPassword(to string) error {
 		Restriction: fmt.Sprintf("%.0f horas", e.conf.RestrictionPeriod.Hours()),
 	}
 
-	tmpl, err := template.ParseFiles("pkg/email/templates/reset_password.html")
+	// ✅ Construcción dinámica de la ruta absoluta del HTML (versión corregida)
+	execDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("error cargando plantilla HTML: %w", err)
+		return fmt.Errorf("error obteniendo directorio actual: %w", err)
+	}
+
+	// Ajusta la ruta según tu estructura real:
+	templatePath := filepath.Join(execDir, "pkg", "resetpassj", "email", "templates", "reset_password.html")
+
+	// Verifica existencia antes de abrir
+	if _, err := os.Stat(templatePath); os.IsNotExist(err) {
+		return fmt.Errorf("la plantilla no existe en: %s", templatePath)
+	}
+
+	// Cargar la plantilla
+	tmpl, err := template.ParseFiles(templatePath)
+	if err != nil {
+		return fmt.Errorf("error cargando plantilla HTML desde %s: %w", templatePath, err)
 	}
 
 	var htmlBody strings.Builder
